@@ -8,17 +8,29 @@ import {
   watch,
 } from "vue";
 import maplibregl, { type Map as MlMap, type GeoJSONSource } from "maplibre-gl";
-import { along, length, lineString, nearestPointOnLine } from "@turf/turf";
+import { lineString, nearestPointOnLine } from "@turf/turf";
 import { useRouteStore } from "./stores/routeStore";
 import { makeGpx } from "./services/routeFiles";
-import type { RouteCheckpoint } from "./types/route";
+import type {
+  DistanceUnit,
+  RouteCheckpoint,
+  CheckpointType,
+} from "./types/route";
 
 const store = useRouteStore();
 const mapEl = ref<HTMLDivElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const mapReady = ref(false);
 const mapError = ref("");
+const editorOpen = ref(false);
+const checkpointDraft = ref<RouteCheckpoint | null>(null);
 let map: MlMap | null = null;
+const unitLabel = computed(() => store.route.distanceUnit);
+const speedLabel = computed(() =>
+  store.route.distanceUnit === "mi" ? "mph" : "km/h",
+);
+const displayDistance = (km: number, digits = 1) =>
+  store.fromKm(km).toFixed(digits);
 const formatDuration = (mins: number) =>
   `${Math.floor(Math.max(0, mins) / 60)}h ${Math.round(Math.max(0, mins) % 60)}m`;
 const formatClock = (mins: number) => {
@@ -26,16 +38,20 @@ const formatClock = (mins: number) => {
   const total = startHour * 60 + startMinute + mins;
   return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(Math.round(total) % 60).padStart(2, "0")}`;
 };
-const arrivalFor = (cp: RouteCheckpoint) =>
-  formatClock(
-    (cp.distanceKm / Math.max(store.route.averageSpeedKmh, 0.1)) * 60 +
-      store.route.checkpoints
-        .filter((x) => x.distanceKm < cp.distanceKm)
-        .reduce((s, x) => s + x.restDurationMinutes, 0),
+const arrivalFor = (cp: RouteCheckpoint) => {
+  const index = store.segmentRows.findIndex(
+    (row) => row.checkpoint.id === cp.id,
   );
-const checkpointRows = computed(() =>
-  [...store.route.checkpoints].sort((a, b) => a.distanceKm - b.distanceKm),
-);
+  const elapsed = store.segmentRows
+    .slice(0, index + 1)
+    .reduce(
+      (sum, row) =>
+        sum + row.ridingMinutes + row.checkpoint.restDurationMinutes,
+      0,
+    );
+  return formatClock(elapsed);
+};
+const checkpointRows = computed(() => store.orderedCheckpoints);
 const elevationPath = computed(() => {
   const vals = store.route.elevations.filter((v): v is number => v !== null);
   if (vals.length < 2) return "";
@@ -69,7 +85,73 @@ const timeLimitHours = computed({
     store.route.timeLimitMinutes = Math.max(0.1, v) * 60;
   },
 });
-
+const targetDistanceDisplay = computed({
+  get: () => Number(displayDistance(store.route.targetDistanceKm, 2)),
+  set: (v: number) => {
+    if (Number.isFinite(v))
+      store.route.targetDistanceKm = store.toKm(Math.max(0, v));
+  },
+});
+const overallSpeedDisplay = computed({
+  get: () =>
+    store.route.speedMode === "split"
+      ? store.speedFromKmh(store.elapsedAverageSpeedKmh)
+      : store.speedFromKmh(store.route.averageSpeedKmh),
+  set: (v: number) => {
+    if (Number.isFinite(v) && v > 0)
+      store.route.averageSpeedKmh = store.speedToKmh(v);
+  },
+});
+const ridingSpeedDisplay = computed(() =>
+  store.speedFromKmh(store.ridingAverageSpeedKmh).toFixed(1),
+);
+const elapsedSpeedDisplay = computed(() =>
+  store.speedFromKmh(store.elapsedAverageSpeedKmh).toFixed(1),
+);
+const draftDistanceDisplay = computed({
+  get: () =>
+    checkpointDraft.value
+      ? Number(displayDistance(checkpointDraft.value.distanceKm, 2))
+      : 0,
+  set: (v: number) => {
+    if (checkpointDraft.value && Number.isFinite(v))
+      checkpointDraft.value.distanceKm = store.toKm(Math.max(0, v));
+  },
+});
+const draftSpeedDisplay = computed({
+  get: () =>
+    checkpointDraft.value
+      ? Number(
+          store
+            .speedFromKmh(
+              checkpointDraft.value.averageSpeedKmh ??
+                store.route.averageSpeedKmh,
+            )
+            .toFixed(2),
+        )
+      : 0,
+  set: (v: number) => {
+    if (checkpointDraft.value && Number.isFinite(v))
+      checkpointDraft.value.averageSpeedKmh = store.speedToKmh(
+        Math.max(0.1, v),
+      );
+  },
+});
+function typeLabel(type: CheckpointType) {
+  return type === "aid_station"
+    ? "Aid Station (A)"
+    : type === "rest"
+      ? "Rest stop"
+      : type === "finish"
+        ? "Finish"
+        : "Split";
+}
+function segmentSpeedFor(cp: RouteCheckpoint) {
+  const row = store.segmentRows.find((item) => item.checkpoint.id === cp.id);
+  return row
+    ? `${store.speedFromKmh(row.speedKmh).toFixed(1)} ${speedLabel.value}`
+    : "—";
+}
 function routeGeoJson() {
   return {
     type: "Feature" as const,
@@ -89,7 +171,7 @@ function checkpointGeoJson() {
         id: cp.id,
         name: cp.name,
         type: cp.type,
-        distance: cp.distanceKm,
+        distance: store.fromKm(cp.distanceKm),
       },
       geometry: {
         type: "Point" as const,
@@ -105,6 +187,15 @@ function refreshMap() {
     GeoJSONSource | undefined;
   routeSource?.setData(routeGeoJson() as never);
   cpSource?.setData(checkpointGeoJson() as never);
+  if (map.getLayer("checkpoint-labels"))
+    map.setLayoutProperty("checkpoint-labels", "text-field", [
+      "concat",
+      ["to-string", ["round", ["get", "distance"]]],
+      " ",
+      unitLabel.value,
+      " · ",
+      ["get", "name"],
+    ]);
 }
 function initMap() {
   if (!mapEl.value) return;
@@ -163,7 +254,7 @@ function initMap() {
           ["get", "type"],
           "rest",
           "#f59e0b",
-          "control",
+          "aid_station",
           "#a78bfa",
           "finish",
           "#22c55e",
@@ -181,7 +272,9 @@ function initMap() {
         "text-field": [
           "concat",
           ["to-string", ["round", ["get", "distance"]]],
-          " km · ",
+          " ",
+          unitLabel.value,
+          " · ",
           ["get", "name"],
         ],
         "text-offset": [0, 1.7],
@@ -205,7 +298,7 @@ function initMap() {
       const km = Number(nearest.properties.location?.toFixed(1) ?? 0);
       store.addCheckpoint("split", km);
       store.setNotice(
-        `Split added at ${km.toFixed(1)} km. Existing route geometry was not changed.`,
+        `Split added at ${displayDistance(km)} ${unitLabel.value}. Existing route geometry was not changed.`,
       );
     });
     const bounds = new maplibregl.LngLatBounds();
@@ -254,35 +347,72 @@ function exportGpx() {
   store.setNotice("GPX export generated.");
 }
 function editCheckpoint(cp: RouteCheckpoint) {
-  const name = window.prompt("Checkpoint name", cp.name);
-  if (name === null) return;
-  const distance = window.prompt(
-    "Distance from start (km)",
-    String(cp.distanceKm),
-  );
-  if (distance === null) return;
-  const km = Number(distance);
-  if (!name.trim() || !Number.isFinite(km) || km < 0 || km > store.distanceKm) {
-    store.error = `Enter a valid name and distance between 0 and ${store.distanceKm.toFixed(1)} km.`;
-    return;
-  }
-  let rest = cp.restDurationMinutes;
-  if (cp.type === "rest") {
-    const val = window.prompt("Rest duration (minutes)", String(rest));
-    if (val === null) return;
-    rest = Math.max(0, Number(val) || 0);
-  }
-  store.updateCheckpoint({
+  checkpointDraft.value = {
     ...cp,
-    name: name.trim(),
-    distanceKm: km,
-    restDurationMinutes: rest,
-  });
+    averageSpeedKmh: cp.averageSpeedKmh ?? store.route.averageSpeedKmh,
+  };
+  editorOpen.value = true;
   store.error = "";
 }
-watch(() => [store.route.coordinates, store.route.checkpoints], refreshMap, {
-  deep: true,
-});
+function closeEditor() {
+  editorOpen.value = false;
+  checkpointDraft.value = null;
+}
+function saveCheckpoint() {
+  const draft = checkpointDraft.value;
+  if (!draft) return;
+  if (
+    !draft.name.trim() ||
+    !Number.isFinite(draft.distanceKm) ||
+    draft.distanceKm < 0 ||
+    draft.distanceKm > store.distanceKm
+  ) {
+    store.error = `Enter a name and a distance between 0 and ${displayDistance(store.distanceKm)} ${unitLabel.value}.`;
+    return;
+  }
+  if (
+    !Number.isFinite(draft.restDurationMinutes) ||
+    draft.restDurationMinutes < 0 ||
+    !Number.isFinite(draft.averageSpeedKmh) ||
+    (draft.averageSpeedKmh ?? 0) <= 0
+  ) {
+    store.error =
+      "Enter a valid segment speed and a non-negative stop duration.";
+    return;
+  }
+  const updated = { ...draft, name: draft.name.trim() };
+  if (updated.type === "finish") updated.distanceKm = store.distanceKm;
+  store.updateCheckpoint(updated);
+  store.error = "";
+  store.setNotice(`${typeLabel(updated.type)} “${updated.name}” updated.`);
+  closeEditor();
+}
+function onCheckpointTypeChange(type: CheckpointType) {
+  if (!checkpointDraft.value) return;
+  checkpointDraft.value.type = type;
+  if (type === "finish") {
+    checkpointDraft.value.name = "Finish";
+    checkpointDraft.value.distanceKm = store.distanceKm;
+  } else if (
+    type === "aid_station" &&
+    !checkpointDraft.value.name.toLowerCase().includes("aid")
+  )
+    checkpointDraft.value.name = "Aid Station";
+  else if (type === "rest" && checkpointDraft.value.restDurationMinutes === 0)
+    checkpointDraft.value.restDurationMinutes = 15;
+}
+function onUnitChange(unit: DistanceUnit) {
+  store.setDistanceUnit(unit);
+}
+watch(
+  () => [
+    store.route.coordinates,
+    store.route.checkpoints,
+    store.route.distanceUnit,
+  ],
+  refreshMap,
+  { deep: true },
+);
 onMounted(() => initMap());
 onBeforeUnmount(() => map?.remove());
 </script>
@@ -310,10 +440,11 @@ onBeforeUnmount(() => map?.remove());
         <label>Route name<input v-model="store.route.name" /></label>
         <div class="two-fields">
           <label
-            >Target distance (km)<input
-              v-model.number="store.route.targetDistanceKm"
+            >Target distance ({{ unitLabel }})<input
+              v-model.number="targetDistanceDisplay"
               type="number"
-              min="1" /></label
+              min="1"
+              step="0.1" /></label
           ><label
             >Time limit (hours)<input
               v-model.number="timeLimitHours"
@@ -323,18 +454,53 @@ onBeforeUnmount(() => map?.remove());
               step="0.5"
           /></label>
         </div>
+        <div class="two-fields unit-speed-row">
+          <label
+            >Distance units<select
+              :value="store.route.distanceUnit"
+              @change="
+                onUnitChange(
+                  ($event.target as HTMLSelectElement).value as DistanceUnit,
+                )
+              "
+            >
+              <option value="km">Kilometres (km)</option>
+              <option value="mi">Miles (mi)</option>
+            </select></label
+          ><label
+            >Speed planning<select v-model="store.route.speedMode">
+              <option value="overall">One overall speed</option>
+              <option value="split">Speed for each segment</option>
+            </select></label
+          >
+        </div>
         <label
-          >Average riding speed
+          >{{
+            store.route.speedMode === "split"
+              ? "Calculated overall average speed (incl. stops)"
+              : "Overall average riding speed"
+          }}
           <div class="input-suffix">
             <input
-              v-model.number="store.route.averageSpeedKmh"
+              v-model.number="overallSpeedDisplay"
               type="number"
-              min="1"
-              max="60"
-              step="0.5"
-            /><span>km/h</span>
+              min="0.1"
+              max="100"
+              step="0.1"
+              :readonly="store.route.speedMode === 'split'"
+            /><span>{{ speedLabel }}</span>
           </div></label
         >
+        <div v-if="store.route.speedMode === 'split'" class="speed-summary">
+          <span>Riding average (moving time)</span
+          ><strong>{{ ridingSpeedDisplay }} {{ speedLabel }}</strong
+          ><span>Elapsed average (incl. stops)</span
+          ><strong>{{ elapsedSpeedDisplay }} {{ speedLabel }}</strong
+          ><small
+            >Set the segment speed in each checkpoint editor. The overall
+            average recalculates automatically.</small
+          >
+        </div>
         <label
           >Ride start time<input v-model="store.route.startTime" type="time"
         /></label>
@@ -362,7 +528,7 @@ onBeforeUnmount(() => map?.remove());
         <div class="legend">
           <span><i class="dot split"></i> Split</span
           ><span><i class="dot rest"></i> Rest stop</span
-          ><span><i class="dot control"></i> Control</span>
+          ><span><i class="dot aid_station"></i> Aid station (A)</span>
         </div>
         <div class="checkpoint-list">
           <div
@@ -374,7 +540,7 @@ onBeforeUnmount(() => map?.remove());
             <div class="checkpoint-info">
               <strong>{{ cp.name }}</strong
               ><small
-                >{{ cp.distanceKm.toFixed(1) }} km · ETA
+                >{{ displayDistance(cp.distanceKm) }} {{ unitLabel }} · ETA
                 {{ arrivalFor(cp) }}</small
               >
             </div>
@@ -396,7 +562,13 @@ onBeforeUnmount(() => map?.remove());
         </div>
         <div class="add-actions">
           <button @click="store.addCheckpoint('split')">＋ Add split</button
-          ><button @click="store.addCheckpoint('rest')">＋ Rest stop</button>
+          ><button @click="store.addCheckpoint('rest')">＋ Rest stop</button
+          ><button
+            class="wide-action"
+            @click="store.addCheckpoint('aid_station')"
+          >
+            ＋ Aid Station (A)
+          </button>
         </div>
         <div class="hint">
           Tip: click anywhere on the route map to place a split at the nearest
@@ -413,7 +585,8 @@ onBeforeUnmount(() => map?.remove());
           <div ref="mapEl" class="map-canvas"></div>
           <div v-if="!mapReady" class="map-loading">Loading route map…</div>
           <div class="map-tag">
-            ⌖ {{ store.distanceKm.toFixed(1) }} KM ROUTE
+            ⌖ {{ displayDistance(store.distanceKm) }}
+            {{ unitLabel.toUpperCase() }} ROUTE
           </div>
           <div class="map-help">Click route to add a split</div>
         </div>
@@ -445,11 +618,20 @@ onBeforeUnmount(() => map?.remove());
               />
             </svg>
             <div class="chart-axis">
-              <span>0 km</span
-              ><span>{{ (store.distanceKm * 0.25).toFixed(0) }} km</span
-              ><span>{{ (store.distanceKm * 0.5).toFixed(0) }} km</span
-              ><span>{{ (store.distanceKm * 0.75).toFixed(0) }} km</span
-              ><span>{{ store.distanceKm.toFixed(0) }} km</span>
+              <span>0 {{ unitLabel }}</span
+              ><span
+                >{{ displayDistance(store.distanceKm * 0.25, 0) }}
+                {{ unitLabel }}</span
+              ><span
+                >{{ displayDistance(store.distanceKm * 0.5, 0) }}
+                {{ unitLabel }}</span
+              ><span
+                >{{ displayDistance(store.distanceKm * 0.75, 0) }}
+                {{ unitLabel }}</span
+              ><span
+                >{{ displayDistance(store.distanceKm, 0) }}
+                {{ unitLabel }}</span
+              >
             </div>
           </div>
           <div v-else class="empty-chart">
@@ -468,7 +650,8 @@ onBeforeUnmount(() => map?.remove());
                   <th>TYPE</th>
                   <th>CHECKPOINT</th>
                   <th>DISTANCE</th>
-                  <th>REST</th>
+                  <th>SEGMENT SPEED</th>
+                  <th>STOP</th>
                   <th>EST. ARRIVAL</th>
                   <th></th>
                 </tr>
@@ -477,7 +660,8 @@ onBeforeUnmount(() => map?.remove());
                 <tr v-for="cp in checkpointRows" :key="cp.id">
                   <td><i class="dot" :class="cp.type"></i></td>
                   <td>{{ cp.name }}</td>
-                  <td>{{ cp.distanceKm.toFixed(1) }} km</td>
+                  <td>{{ displayDistance(cp.distanceKm) }} {{ unitLabel }}</td>
+                  <td>{{ segmentSpeedFor(cp) }}</td>
                   <td>
                     {{
                       cp.restDurationMinutes
@@ -505,7 +689,8 @@ onBeforeUnmount(() => map?.remove());
             <div class="metric">
               <span>⌖</span
               ><strong
-                >{{ store.distanceKm.toFixed(1) }}<small> km</small></strong
+                >{{ displayDistance(store.distanceKm)
+                }}<small> {{ unitLabel }}</small></strong
               ><label>ROUTE DISTANCE</label>
             </div>
             <div class="metric">
@@ -522,7 +707,7 @@ onBeforeUnmount(() => map?.remove());
             <div class="metric">
               <span>☕</span
               ><strong>{{ formatDuration(store.restMinutes) }}</strong
-              ><label>REST TIME</label>
+              ><label>STOP TIME</label>
             </div>
           </div>
           <div class="total-time">
@@ -543,10 +728,12 @@ onBeforeUnmount(() => map?.remove());
               ><small>{{
                 !store.distanceWithinTarget
                   ? "Route is " +
-                    (store.distanceKm - store.route.targetDistanceKm).toFixed(
-                      1,
+                    displayDistance(
+                      store.distanceKm - store.route.targetDistanceKm,
                     ) +
-                    " km over target"
+                    " " +
+                    unitLabel +
+                    " over target"
                   : store.onTime
                     ? formatDuration(store.remainingMinutes) +
                       " remaining time buffer"
@@ -624,6 +811,95 @@ onBeforeUnmount(() => map?.remove());
         </button>
       </div>
     </footer>
+    <div
+      v-if="editorOpen && checkpointDraft"
+      class="modal-backdrop"
+      @click.self="closeEditor"
+      @keydown.esc="closeEditor"
+    >
+      <section
+        class="checkpoint-modal panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="checkpoint-editor-title"
+      >
+        <div class="modal-heading">
+          <div>
+            <span class="section-label">ROUTE PLANNING</span>
+            <h2 id="checkpoint-editor-title">Edit checkpoint</h2>
+            <p>Configure every planning value for this checkpoint.</p>
+          </div>
+          <button
+            class="modal-close"
+            aria-label="Close editor"
+            @click="closeEditor"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal-grid">
+          <label
+            >Checkpoint type<select
+              :value="checkpointDraft.type"
+              @change="
+                onCheckpointTypeChange(
+                  ($event.target as HTMLSelectElement).value as CheckpointType,
+                )
+              "
+            >
+              <option value="split">Split</option>
+              <option value="rest">Rest stop</option>
+              <option value="aid_station">Aid Station (A)</option>
+              <option value="finish">Finish</option>
+            </select></label
+          >
+          <label
+            >Checkpoint name<input
+              v-model="checkpointDraft.name"
+              maxlength="80"
+          /></label>
+          <label
+            >Distance from route start ({{ unitLabel }})<input
+              v-model.number="draftDistanceDisplay"
+              type="number"
+              min="0"
+              :max="displayDistance(store.distanceKm, 2)"
+              step="0.1"
+              :disabled="checkpointDraft.type === 'finish'"
+          /></label>
+          <label
+            >Average speed for preceding segment ({{ speedLabel }})<input
+              v-model.number="draftSpeedDisplay"
+              type="number"
+              min="0.1"
+              max="100"
+              step="0.1"
+          /></label>
+          <label
+            >Stop duration (minutes)<input
+              v-model.number="checkpointDraft.restDurationMinutes"
+              type="number"
+              min="0"
+              max="1440"
+              step="1"
+          /></label>
+          <div class="modal-field-note">
+            <strong>How speed is applied</strong
+            ><span
+              >This speed applies from the previous checkpoint (or route start)
+              to this checkpoint. Stop duration is added after arrival.</span
+            >
+          </div>
+        </div>
+        <div v-if="store.error" class="modal-error">{{ store.error }}</div>
+        <div class="modal-actions">
+          <button class="secondary-btn" @click="closeEditor">Cancel</button
+          ><button class="primary-btn" @click="saveCheckpoint">
+            Save checkpoint
+          </button>
+        </div>
+      </section>
+    </div>
     <div v-if="mapError" class="toast">{{ mapError }}</div>
   </div>
 </template>

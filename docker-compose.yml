@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: endurance-route-planner-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: endurance_route_planner
+      POSTGRES_USER: planner
+      POSTGRES_PASSWORD: planner_local_dev_only
+    ports:
+      - '5432:5432'
+    volumes:
+      - planner_postgres_data:/var/lib/postgresql/data
+      - ./server/database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U planner -d endurance_route_planner']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  planner_postgres_data:

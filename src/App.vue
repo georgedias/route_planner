@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import maplibregl, { type Map as MlMap, type GeoJSONSource } from 'maplibre-gl'
 import { lineString, nearestPointOnLine } from '@turf/turf'
 import { useRouteStore } from './stores/routeStore'
+import { APPLICATION_MODE } from './config/runtimeMode'
 import { makeGpx } from './services/routeFiles'
 import type { DistanceUnit, RouteCheckpoint, CheckpointType } from './types/route'
 
@@ -211,7 +212,7 @@ onBeforeUnmount(()=>map?.remove())
     <header class="topbar">
       <div class="brand"><div class="brand-mark">⌁</div><div><strong>ENDURANCE</strong><span>ROUTE PLANNER</span></div></div>
       <nav><a class="active">⌖ Route Planner</a><a>▤ My Routes</a><a>↗ Ride with GPS</a><a>⚙ Settings</a></nav>
-      <div class="profile"><span class="avatar">GP</span><span>Planner</span><span>⌄</span></div>
+      <div class="profile"><span class="mode-pill">{{ APPLICATION_MODE === 'local' ? 'LOCAL MODE' : 'HOSTED MODE' }}</span><span class="avatar">GP</span><span>Planner</span><span>⌄</span></div>
     </header>
     <main class="workspace">
       <aside class="sidebar panel">
@@ -232,7 +233,7 @@ onBeforeUnmount(()=>map?.remove())
         <div class="two-fields"><label>Ride start date<input v-model="store.route.startDate" type="date" /></label><label>Ride start time<input v-model="store.route.startTime" type="time" /></label></div>
         <label>Clock format<select v-model="store.route.clockFormat"><option value="12h">12-hour (AM / PM)</option><option value="24h">24-hour</option></select></label>
         <div class="section-label">IMPORT / LOAD ROUTE</div>
-        <div class="import-actions"><button type="button" :disabled="uploadingRoute" @click="openFilePicker"><b>⇧</b>{{ uploadingRoute ? 'Importing…' : 'Upload GPX / TCX' }}</button><button disabled title="Ride with GPS OAuth integration is planned for a later milestone"><b>↗</b>Ride with GPS</button></div>
+        <div class="import-actions"><button type="button" :disabled="uploadingRoute" @click="openFilePicker"><b>⇧</b>{{ uploadingRoute ? 'Importing…' : 'Upload GPX / TCX' }}</button><button disabled title="Ride with GPS connection will be available through the local companion service or hosted account integration"><b>↗</b>Ride with GPS</button></div>
         <input ref="fileInput" class="file-picker-input" type="file" accept=".gpx,.tcx,application/gpx+xml,application/xml,text/xml" aria-label="Choose a GPX or TCX route file" @change="importSelected" />
         <div v-if="uploadingRoute" class="upload-feedback" role="status" aria-live="polite">Reading route file and preparing the map…</div>
         <div v-else-if="store.error" class="upload-feedback upload-error" role="alert">{{ store.error }}</div>

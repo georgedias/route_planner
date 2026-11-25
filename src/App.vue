@@ -19,12 +19,36 @@ const unitLabel = computed(() => store.route.distanceUnit)
 const speedLabel = computed(() => store.route.distanceUnit === 'mi' ? 'mph' : 'km/h')
 const displayDistance = (km: number, digits = 1) => store.fromKm(km).toFixed(digits)
 const formatDuration = (mins: number) => `${Math.floor(Math.max(0, mins) / 60)}h ${Math.round(Math.max(0, mins) % 60)}m`
-const formatClock = (mins: number) => { const [startHour,startMinute] = store.route.startTime.split(':').map(Number); const total = startHour * 60 + startMinute + mins; return `${String(Math.floor(total / 60) % 24).padStart(2,'0')}:${String(Math.round(total) % 60).padStart(2,'0')}` }
-const arrivalFor = (cp: RouteCheckpoint) => {
-  const index = store.segmentRows.findIndex(row => row.checkpoint.id === cp.id)
-  const elapsed = store.segmentRows.slice(0, index + 1).reduce((sum, row) => sum + row.ridingMinutes + row.checkpoint.restDurationMinutes, 0)
-  return formatClock(elapsed)
+const formatClock = (elapsedMinutes: number) => {
+  const [startHour, startMinute] = store.route.startTime.split(':').map(Number)
+  const total = Math.round(startHour * 60 + startMinute + elapsedMinutes)
+  const minutesOfDay = ((total % 1440) + 1440) % 1440
+  const hour = Math.floor(minutesOfDay / 60)
+  const minute = minutesOfDay % 60
+  if (store.route.clockFormat === '12h') {
+    const displayHour = hour % 12 || 12
+    return `${displayHour}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`
+  }
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
+const scheduleFor = (cp: RouteCheckpoint) => {
+  const index = store.segmentRows.findIndex(row => row.checkpoint.id === cp.id)
+  if (index < 0) return { arrivalMinutes: 0, departureMinutes: 0, day: '—' }
+  // Include earlier checkpoint stops, but not this checkpoint's stop, in arrival.
+  const elapsedBefore = store.segmentRows.slice(0, index).reduce((sum, row) => sum + row.ridingMinutes + row.checkpoint.restDurationMinutes, 0)
+  const arrivalMinutes = elapsedBefore + store.segmentRows[index].ridingMinutes
+  const departureMinutes = arrivalMinutes + Math.max(0, cp.restDurationMinutes)
+  // Weekday must be based on the full clock time: ride start time + elapsed
+  // riding/stopping time. Starting at midnight here caused arrivals after
+  // midnight (e.g. 12:48 AM after a 7:42 PM start) to retain the prior day.
+  const start = new Date(`${store.route.startDate}T00:00:00`)
+  const [startHour, startMinute] = store.route.startTime.split(':').map(Number)
+  start.setMinutes(start.getMinutes() + startHour * 60 + startMinute + Math.round(arrivalMinutes))
+  return { arrivalMinutes, departureMinutes, day: Number.isNaN(start.getTime()) ? '—' : start.toLocaleDateString('en-US', { weekday: 'short' }) }
+}
+const arrivalFor = (cp: RouteCheckpoint) => formatClock(scheduleFor(cp).arrivalMinutes)
+const departureFor = (cp: RouteCheckpoint) => formatClock(scheduleFor(cp).departureMinutes)
+const dayFor = (cp: RouteCheckpoint) => scheduleFor(cp).day
 const checkpointRows = computed(() => store.orderedCheckpoints)
 const elevationPath = computed(() => {
   const vals = store.route.elevations.filter((v): v is number => v !== null)
@@ -169,7 +193,8 @@ onBeforeUnmount(()=>map?.remove())
         <div class="two-fields unit-speed-row"><label>Distance units<select :value="store.route.distanceUnit" @change="onUnitChange(($event.target as HTMLSelectElement).value as DistanceUnit)"><option value="km">Kilometres (km)</option><option value="mi">Miles (mi)</option></select></label><label>Speed planning<select v-model="store.route.speedMode"><option value="overall">One overall speed</option><option value="split">Speed for each segment</option></select></label></div>
         <label>{{ store.route.speedMode === 'split' ? 'Calculated overall average speed (incl. stops)' : 'Overall average riding speed' }} <div class="input-suffix"><input v-model.number="overallSpeedDisplay" type="number" min="0.1" max="100" step="0.1" :readonly="store.route.speedMode === 'split'"/><span>{{ speedLabel }}</span></div></label>
         <div v-if="store.route.speedMode === 'split'" class="speed-summary"><span>Riding average (moving time)</span><strong>{{ ridingSpeedDisplay }} {{ speedLabel }}</strong><span>Elapsed average (incl. stops)</span><strong>{{ elapsedSpeedDisplay }} {{ speedLabel }}</strong><small>Set the segment speed in each checkpoint editor. The overall average recalculates automatically.</small></div>
-        <label>Ride start time<input v-model="store.route.startTime" type="time" /></label>
+        <div class="two-fields"><label>Ride start date<input v-model="store.route.startDate" type="date" /></label><label>Ride start time<input v-model="store.route.startTime" type="time" /></label></div>
+        <label>Clock format<select v-model="store.route.clockFormat"><option value="12h">12-hour (AM / PM)</option><option value="24h">24-hour</option></select></label>
         <div class="section-label">IMPORT / LOAD ROUTE</div>
         <div class="import-actions"><button type="button" :disabled="uploadingRoute" @click="openFilePicker"><b>⇧</b>{{ uploadingRoute ? 'Importing…' : 'Upload GPX / TCX' }}</button><button disabled title="Ride with GPS OAuth integration is planned for a later milestone"><b>↗</b>Ride with GPS</button></div>
         <input ref="fileInput" class="file-picker-input" type="file" accept=".gpx,.tcx,application/gpx+xml,application/xml,text/xml" aria-label="Choose a GPX or TCX route file" @change="importSelected" />
@@ -198,7 +223,7 @@ onBeforeUnmount(()=>map?.remove())
         </div>
         <div class="table-panel panel">
           <div class="panel-heading">Checkpoint details <span class="muted">{{ checkpointRows.length }} checkpoints</span></div>
-          <div class="table-scroll"><table><thead><tr><th>TYPE</th><th>CHECKPOINT</th><th>DISTANCE</th><th>SEGMENT SPEED</th><th>STOP</th><th>EST. ARRIVAL</th><th></th></tr></thead><tbody><tr v-for="cp in checkpointRows" :key="cp.id"><td><i class="dot" :class="cp.type"></i></td><td>{{ cp.name }}</td><td>{{ displayDistance(cp.distanceKm) }} {{ unitLabel }}</td><td>{{ segmentSpeedFor(cp) }}</td><td>{{ cp.restDurationMinutes ? cp.restDurationMinutes+' min' : '—' }}</td><td>{{ arrivalFor(cp) }}</td><td><button class="table-edit" @click="editCheckpoint(cp)">Edit</button></td></tr><tr v-if="checkpointRows.length === 0"><td colspan="7" class="empty-checkpoints">No checkpoints have been imported yet.</td></tr></tbody></table></div>
+          <div class="table-scroll"><table><thead><tr><th>TYPE</th><th>CHECKPOINT</th><th>DISTANCE</th><th>SEGMENT SPEED</th><th>DAY</th><th>EST. ARRIVAL</th><th>STOP</th><th>EST. DEPARTURE</th><th></th></tr></thead><tbody><tr v-for="cp in checkpointRows" :key="cp.id"><td><i class="dot" :class="cp.type"></i></td><td>{{ cp.name }}</td><td>{{ displayDistance(cp.distanceKm) }} {{ unitLabel }}</td><td>{{ segmentSpeedFor(cp) }}</td><td>{{ dayFor(cp) }}</td><td>{{ arrivalFor(cp) }}</td><td>{{ cp.restDurationMinutes ? cp.restDurationMinutes+' min' : '—' }}</td><td>{{ departureFor(cp) }}</td><td><button class="table-edit" @click="editCheckpoint(cp)">Edit</button></td></tr><tr v-if="checkpointRows.length === 0"><td colspan="9" class="empty-checkpoints">No checkpoints have been imported yet.</td></tr></tbody></table></div>
         </div>
       </section>
 

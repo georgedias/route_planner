@@ -8,6 +8,7 @@ const demoCoordinates: Position[] = [
   [-92.25, 37.83],[-92.20,37.87],[-92.14,37.90],[-92.08,37.91],[-92.02,37.95],[-91.96,37.98],[-91.90,38.01],[-91.84,38.04],[-91.78,38.07],[-91.72,38.10],[-91.66,38.14],[-91.60,38.17],[-91.54,38.20],[-91.48,38.23],[-91.42,38.26],[-91.36,38.29],[-91.30,38.32],[-91.24,38.35],[-91.18,38.38],[-91.12,38.41]
 ]
 const DEMO_ROUTE_DISTANCE_KM = length(lineString(demoCoordinates), { units: 'kilometers' })
+const localDateString = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}` }
 
 // randomUUID() is only available in secure browser contexts in some browsers.
 // Check for it, but keep imports working on local/LAN HTTP deployments too.
@@ -27,7 +28,7 @@ export const useRouteStore = defineStore('route', () => {
     id: 'demo-route', name: 'Ozark Century Challenge', source: 'demo', coordinates: demoCoordinates,
     elevations: demoCoordinates.map((_, i) => 210 + Math.round(95 * Math.abs(Math.sin(i * 1.4)) + 30 * Math.sin(i * .45))),
     distanceKm: 0, targetDistanceKm: DEMO_ROUTE_DISTANCE_KM, timeLimitMinutes: DEMO_ROUTE_DISTANCE_KM / DEFAULT_ESTIMATED_SPEED_KMH * 60, averageSpeedKmh: DEFAULT_ESTIMATED_SPEED_KMH,
-    speedMode: 'overall', distanceUnit: APP_CONFIG.defaultDistanceUnit, startTime: '07:00',
+    speedMode: 'overall', distanceUnit: APP_CONFIG.defaultDistanceUnit, startTime: '07:00', startDate: localDateString(), clockFormat: '12h',
     checkpoints: [
       { id: 'cp-1', type: 'split', name: 'Split 1', distanceKm: 40, restDurationMinutes: 0, averageSpeedKmh: 23 },
       { id: 'cp-2', type: 'rest', name: 'Convenience Store', distanceKm: 75, restDurationMinutes: 20 },

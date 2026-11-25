@@ -27,6 +27,8 @@ npm run build
 - Kilometre/mile distance and speed display (canonical values remain stored in metric units)
 - Overall-speed planning or individual average speed for each checkpoint-to-checkpoint segment
 - Calculated riding average and elapsed average, including checkpoint stop durations
+- Checkpoint schedule with estimated arrival, stop duration, and estimated departure times
+- Ride start date for weekday calculation, with selectable 12-hour (AM/PM) or 24-hour clock display
 - Add, edit, and remove split, rest, and Aid Station (A) checkpoints
 - Full checkpoint editor modal with type, name, route distance, segment speed, and stop duration
 - Place checkpoints by clicking the nearest point on the existing route
@@ -48,7 +50,8 @@ The frontend uses Vue 3, Vite, TypeScript, Pinia, MapLibre GL JS, and Turf.js. T
 - Keep route geometry and planning checkpoints separate.
 - Store checkpoint positions and target distances as kilometres internally; convert only for display and input.
 - In split-speed mode, each checkpoint's average speed applies to the segment from the previous checkpoint to that checkpoint.
-- Stop duration is added after arrival; elapsed average includes stop time while riding average excludes it.
+- Stop duration is added after arrival; estimated departure equals arrival plus that checkpoint’s stop duration. Earlier stops are included in later arrival estimates.
+- Weekday labels are calculated from the selected ride start date and each checkpoint’s estimated arrival; the displayed clock format can be switched between 12-hour and 24-hour.
 - Preserve imported geometry; future rerouting should create a new route version.
 
 ## Next milestone
@@ -61,7 +64,3 @@ The frontend uses Vue 3, Vite, TypeScript, Pinia, MapLibre GL JS, and Turf.js. T
 ### Import planning defaults
 
 A successful GPX/TCX import sets the target distance and Finish checkpoint to the imported track length, retains the selected distance unit for display, and initializes the overall speed and time estimate using the configurable 10 mph default. Change `estimatedTravelSpeedMph` and `defaultDistanceUnit` in `src/config/appConfig.ts` to adjust these defaults. Time is estimated as imported route distance divided by the configured speed; checkpoint/rest time is not added to this initial estimate.
-
-### Route import: map focus and waypoint checkpoints
-
-After a GPX or TCX import, the map resizes and fits the full imported track plus all imported waypoint coordinates. If the map is still loading when the file is selected, the fit is deferred until the map is ready. The checkpoint list is replaced with the imported route's waypoints and a new Finish row; checkpoints from the previously loaded route are discarded. GPX `<wpt>` and TCX `CoursePoint` labels are preserved exactly as supplied by the file. Waypoint category (Rest stop or Aid Station) is stored separately from its original name.

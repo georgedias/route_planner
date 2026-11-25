@@ -2,6 +2,7 @@ export type Position = [number, number]
 export type CheckpointType = 'split' | 'rest' | 'aid_station' | 'finish'
 export type DistanceUnit = 'km' | 'mi'
 export type SpeedMode = 'overall' | 'split'
+export type ClockFormat = '12h' | '24h'
 export interface RoutePoint { coordinates: Position; distanceKm: number; elevationM?: number }
 export interface RouteCheckpoint {
   id: string
@@ -32,4 +33,8 @@ export interface RoutePlan {
   speedMode: SpeedMode
   distanceUnit: DistanceUnit
   startTime: string
+  /** Local calendar date on which the ride starts, used for weekday estimates. */
+  startDate: string
+  /** Display preference for estimated arrival and departure times. */
+  clockFormat: ClockFormat
 }

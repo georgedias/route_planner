@@ -1,0 +1,25 @@
+{
+  "name": "@endurance-route-planner/web",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@endurance-route-planner/shared": "0.2.0",
+    "@turf/turf": "^7.2.0",
+    "maplibre-gl": "^5.6.0",
+    "pinia": "^3.0.3",
+    "vue": "^3.5.17"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.0",
+    "vue-tsc": "^2.2.12"
+  }
+}

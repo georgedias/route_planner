@@ -1,4 +1,4 @@
-import type { RoutePlan } from '../../packages/shared/src/route'
+import type { RoutePlan } from '@endurance-route-planner/shared'
 
 /** Storage boundary: route calculations and the domain model do not depend on persistence. */
 export interface RouteRepository {

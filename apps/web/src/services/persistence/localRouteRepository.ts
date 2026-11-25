@@ -1,4 +1,4 @@
-import type { RoutePlan } from '../../packages/shared/src/route'
+import type { RoutePlan } from '@endurance-route-planner/shared'
 import type { RouteRepository } from './routeRepository'
 
 const DATABASE_NAME = 'endurance-route-planner'

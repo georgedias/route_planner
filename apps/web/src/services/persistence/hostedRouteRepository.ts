@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../../config/runtimeMode'
-import type { RoutePlan } from '../../packages/shared/src/route'
+import type { RoutePlan } from '@endurance-route-planner/shared'
 import type { RouteRepository } from './routeRepository'
 
 /**

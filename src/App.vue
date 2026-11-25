@@ -16,7 +16,9 @@ const editorOpen = ref(false)
 const checkpointDraft = ref<RouteCheckpoint | null>(null)
 let map: MlMap | null = null
 const unitLabel = computed(() => store.route.distanceUnit)
+// Route distances and speeds stay canonical in km and km/h inside the store.
 const speedLabel = computed(() => store.route.distanceUnit === 'mi' ? 'mph' : 'km/h')
+// Convert canonical kilometre values only when presenting them in the UI.
 const displayDistance = (km: number, digits = 1) => store.fromKm(km).toFixed(digits)
 const formatDuration = (mins: number) => `${Math.floor(Math.max(0, mins) / 60)}h ${Math.round(Math.max(0, mins) % 60)}m`
 const formatClock = (elapsedMinutes: number) => {
@@ -31,6 +33,8 @@ const formatClock = (elapsedMinutes: number) => {
   }
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
+// Estimate each checkpoint's arrival/departure from the preceding ride legs
+// and stops. The weekday calculation includes the configured start clock time.
 const scheduleFor = (cp: RouteCheckpoint) => {
   const index = store.segmentRows.findIndex(row => row.checkpoint.id === cp.id)
   if (index < 0) return { arrivalMinutes: 0, departureMinutes: 0, day: '—' }
@@ -50,6 +54,7 @@ const arrivalFor = (cp: RouteCheckpoint) => formatClock(scheduleFor(cp).arrivalM
 const departureFor = (cp: RouteCheckpoint) => formatClock(scheduleFor(cp).departureMinutes)
 const dayFor = (cp: RouteCheckpoint) => scheduleFor(cp).day
 const checkpointRows = computed(() => store.orderedCheckpoints)
+// Convert the elevation profile into a compact SVG path for the chart preview.
 const elevationPath = computed(() => {
   const vals = store.route.elevations.filter((v): v is number => v !== null)
   if (vals.length < 2) return ''
@@ -75,11 +80,28 @@ const draftSpeedDisplay = computed({
   set: (v: number) => { if (checkpointDraft.value && Number.isFinite(v)) checkpointDraft.value.averageSpeedKmh = store.speedToKmh(Math.max(0.1, v)) }
 })
 function typeLabel(type: CheckpointType) { return type === 'aid_station' ? 'Aid Station (A)' : type === 'rest' ? 'Rest stop' : type === 'finish' ? 'Finish' : 'Split' }
-function segmentSpeedFor(cp: RouteCheckpoint) { const row = store.segmentRows.find(item => item.checkpoint.id === cp.id); return row ? `${store.speedFromKmh(row.speedKmh).toFixed(1)} ${speedLabel.value}` : '—' }
+function segmentSpeedFor(cp: RouteCheckpoint) {
+  const row = store.segmentRows.find(item => item.checkpoint.id === cp.id)
+  return row ? `${store.speedFromKmh(row.speedKmh).toFixed(1)} ${speedLabel.value}` : '—'
+}
+
+/**
+ * Return the distance travelled on the leg ending at this checkpoint.
+ * Segment distances are stored in canonical kilometres; convert only for display
+ * so the value and unit follow the user's selected route units.
+ */
+function segmentDistanceDisplay(cp: RouteCheckpoint) {
+  const row = store.segmentRows.find(item => item.checkpoint.id === cp.id)
+  if (!row) return '—'
+
+  return displayDistance(row.segmentDistanceKm, 1)
+}
+// MapLibre sources consume GeoJSON; the route/checkpoint model remains canonical.
 function routeGeoJson() { return { type:'Feature' as const, properties:{}, geometry:{ type:'LineString' as const, coordinates:store.route.coordinates } } }
 function checkpointGeoJson() {
   return { type:'FeatureCollection' as const, features:store.route.checkpoints.map(cp => ({ type:'Feature' as const, properties:{ id:cp.id, name:cp.name, type:cp.type, distance:store.fromKm(cp.distanceKm) }, geometry:{ type:'Point' as const, coordinates:cp.coordinates ?? store.pointAt(cp.distanceKm) } })) }
 }
+// Push current reactive route/checkpoint data into the existing MapLibre sources.
 function refreshMap() {
   if (!map || !mapReady.value) return
   const routeSource = map.getSource('route-line') as GeoJSONSource | undefined
@@ -87,6 +109,9 @@ function refreshMap() {
   routeSource?.setData(routeGeoJson() as never); cpSource?.setData(checkpointGeoJson() as never)
   if (map.getLayer('checkpoint-labels')) map.setLayoutProperty('checkpoint-labels', 'text-field', ['concat',['to-string',['round',['get','distance']]],' ',unitLabel.value,' · ',['get','name']])
 }
+// Create the map once, then add route and checkpoint layers after its style loads.
+// An empty attributionControl object disables the built-in control while the
+// OpenStreetMap attribution remains available through the raster source metadata.
 function initMap() {
   if (!mapEl.value) return
   map = new maplibregl.Map({ container:mapEl.value, style:{ version:8, sources:{ osm:{ type:'raster', tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize:256, attribution:'© OpenStreetMap contributors' } }, layers:[{ id:'osm', type:'raster', source:'osm' }] }, center:store.route.coordinates[0], zoom:8.5, attributionControl:{} })
@@ -144,11 +169,14 @@ async function importSelected(e: Event) {
     uploadingRoute.value = false
   }
 }
+// Fit both the route line and any off-line imported waypoint coordinates.
 function fitRoute(){ if(!map||!store.route.coordinates.length)return; const b=new maplibregl.LngLatBounds();store.route.coordinates.forEach(c=>b.extend(c));store.route.checkpoints.forEach(cp=>{if(cp.coordinates)b.extend(cp.coordinates)});map.fitBounds(b,{padding:65,duration:700});refreshMap() }
 watch(() => store.route.coordinates, async () => { await nextTick(); if (map && mapReady.value) fitRoute() })
+// Export the original route geometry; planning target edits do not reshape it.
 function exportGpx(){const content=makeGpx(store.route.name,store.route.coordinates,store.route.elevations);const blob=new Blob([content],{type:'application/gpx+xml'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${store.route.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.gpx`;a.click();URL.revokeObjectURL(url);store.setNotice('GPX export generated.')}
 function editCheckpoint(cp:RouteCheckpoint){ checkpointDraft.value = { ...cp, averageSpeedKmh: cp.averageSpeedKmh ?? store.route.averageSpeedKmh }; editorOpen.value = true; store.error = '' }
 function closeEditor(){ editorOpen.value = false; checkpointDraft.value = null }
+// Validate and persist the edited checkpoint, keeping Finish tied to target distance.
 function saveCheckpoint(){
   const draft = checkpointDraft.value
   if (!draft) return
@@ -192,7 +220,15 @@ onBeforeUnmount(()=>map?.remove())
         <div class="two-fields"><label>Target distance ({{ unitLabel }})<input v-model.number="targetDistanceDisplay" type="number" min="1" step="0.1" /></label><label>Time limit (hours)<input v-model.number="timeLimitHours" type="number" min="0.1" max="48" step="0.5" /></label></div>
         <div class="two-fields unit-speed-row"><label>Distance units<select :value="store.route.distanceUnit" @change="onUnitChange(($event.target as HTMLSelectElement).value as DistanceUnit)"><option value="km">Kilometres (km)</option><option value="mi">Miles (mi)</option></select></label><label>Speed planning<select v-model="store.route.speedMode"><option value="overall">One overall speed</option><option value="split">Speed for each segment</option></select></label></div>
         <label>{{ store.route.speedMode === 'split' ? 'Calculated overall average speed (incl. stops)' : 'Overall average riding speed' }} <div class="input-suffix"><input v-model.number="overallSpeedDisplay" type="number" min="0.1" max="100" step="0.1" :readonly="store.route.speedMode === 'split'"/><span>{{ speedLabel }}</span></div></label>
-        <div v-if="store.route.speedMode === 'split'" class="speed-summary"><span>Riding average (moving time)</span><strong>{{ ridingSpeedDisplay }} {{ speedLabel }}</strong><span>Elapsed average (incl. stops)</span><strong>{{ elapsedSpeedDisplay }} {{ speedLabel }}</strong><small>Set the segment speed in each checkpoint editor. The overall average recalculates automatically.</small></div>
+        <div v-if="store.route.speedMode === 'split'" class="speed-summary">
+          <span>Riding average (moving time)</span>
+          <strong>{{ ridingSpeedDisplay }} {{ speedLabel }}</strong>
+          <span>Elapsed average (incl. stops)</span>
+          <strong>{{ elapsedSpeedDisplay }} {{ speedLabel }}</strong>
+          <span>Total stoppage time</span>
+          <strong>{{ formatDuration(store.restMinutes) }}</strong>
+          <small>Set the segment speed and stop duration in each checkpoint editor. The overall average recalculates automatically.</small>
+        </div>
         <div class="two-fields"><label>Ride start date<input v-model="store.route.startDate" type="date" /></label><label>Ride start time<input v-model="store.route.startTime" type="time" /></label></div>
         <label>Clock format<select v-model="store.route.clockFormat"><option value="12h">12-hour (AM / PM)</option><option value="24h">24-hour</option></select></label>
         <div class="section-label">IMPORT / LOAD ROUTE</div>
@@ -223,7 +259,26 @@ onBeforeUnmount(()=>map?.remove())
         </div>
         <div class="table-panel panel">
           <div class="panel-heading">Checkpoint details <span class="muted">{{ checkpointRows.length }} checkpoints</span></div>
-          <div class="table-scroll"><table><thead><tr><th>TYPE</th><th>CHECKPOINT</th><th>DISTANCE</th><th>SEGMENT SPEED</th><th>DAY</th><th>EST. ARRIVAL</th><th>STOP</th><th>EST. DEPARTURE</th><th></th></tr></thead><tbody><tr v-for="cp in checkpointRows" :key="cp.id"><td><i class="dot" :class="cp.type"></i></td><td>{{ cp.name }}</td><td>{{ displayDistance(cp.distanceKm) }} {{ unitLabel }}</td><td>{{ segmentSpeedFor(cp) }}</td><td>{{ dayFor(cp) }}</td><td>{{ arrivalFor(cp) }}</td><td>{{ cp.restDurationMinutes ? cp.restDurationMinutes+' min' : '—' }}</td><td>{{ departureFor(cp) }}</td><td><button class="table-edit" @click="editCheckpoint(cp)">Edit</button></td></tr><tr v-if="checkpointRows.length === 0"><td colspan="9" class="empty-checkpoints">No checkpoints have been imported yet.</td></tr></tbody></table></div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th colspan="2" class="checkpoint-group-header">CHECKPOINT</th>
+                  <th rowspan="2">ACCUMULATED<br />DISTANCES</th>
+                  <th rowspan="2">SEGMENT<br />SPEED</th>
+                  <th rowspan="2">{{ unitLabel === 'mi' ? 'MILES' : 'KILOMETERS' }}<br />TRAVELLED</th>
+                  <th rowspan="2">WEEK<br />DAY</th>
+                  <th rowspan="2">EST.<br />ARRIVAL</th>
+                  <th rowspan="2">STOP<br />TIME</th>
+                  <th rowspan="2">EST.<br />DEPARTURE</th>
+                  <th rowspan="2"></th>
+                </tr>
+                <tr>
+                  <th>TYPE</th>
+                  <th>NAME</th>
+                </tr>
+              </thead>
+              <tbody><tr v-for="cp in checkpointRows" :key="cp.id"><td><i class="dot" :class="cp.type"></i></td><td>{{ cp.name }}</td><td>{{ displayDistance(cp.distanceKm) }} {{ unitLabel }}</td><td>{{ segmentSpeedFor(cp) }}</td><td>{{ segmentDistanceDisplay(cp) }} {{ unitLabel }}</td><td>{{ dayFor(cp) }}</td><td>{{ arrivalFor(cp) }}</td><td>{{ cp.restDurationMinutes ? cp.restDurationMinutes+' min' : '—' }}</td><td>{{ departureFor(cp) }}</td><td><button class="table-edit" @click="editCheckpoint(cp)">Edit</button></td></tr><tr v-if="checkpointRows.length === 0"><td colspan="10" class="empty-checkpoints">No checkpoints have been imported yet.</td></tr></tbody></table></div>
         </div>
       </section>
 

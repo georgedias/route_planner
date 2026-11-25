@@ -1,9 +1,14 @@
+/** GeoJSON position in [longitude, latitude] order. */
 export type Position = [number, number]
 export type CheckpointType = 'split' | 'rest' | 'aid_station' | 'finish'
 export type DistanceUnit = 'km' | 'mi'
 export type SpeedMode = 'overall' | 'split'
 export type ClockFormat = '12h' | '24h'
-export interface RoutePoint { coordinates: Position; distanceKm: number; elevationM?: number }
+export interface RoutePoint {
+  coordinates: Position
+  distanceKm: number
+  elevationM?: number
+}
 export interface RouteCheckpoint {
   id: string
   type: CheckpointType
@@ -17,6 +22,10 @@ export interface RouteCheckpoint {
   /** Original imported waypoint location; omitted for manually placed checkpoints. */
   coordinates?: Position
 }
+/**
+ * Persisted route model. Distances are canonical kilometres and speeds are
+ * canonical kilometres per hour; UI unit preferences never change storage.
+ */
 export interface RoutePlan {
   id: string
   name: string

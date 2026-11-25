@@ -20,7 +20,9 @@ npm run build
 
 ## Milestone 1 features
 - MapLibre GL JS with OpenStreetMap raster tiles and a demo route
-- GPX 1.1 and TCX trackpoint import
+- GPX 1.1 track and waypoint import, plus TCX trackpoint and CoursePoint import
+- On import, replace existing checkpoints with the imported waypoints and a new Finish checkpoint; classify waypoint names/types containing aid, control, checkpoint, water, fuel, feed, supply, or hydration as Aid Stations, and other waypoints as Rest Stops
+- Plot imported waypoints at their original coordinates and automatically fit the map to the imported route and waypoint extent
 - Route distance calculation with Turf.js
 - Kilometre/mile distance and speed display (canonical values remain stored in metric units)
 - Overall-speed planning or individual average speed for each checkpoint-to-checkpoint segment
@@ -54,3 +56,12 @@ The frontend uses Vue 3, Vite, TypeScript, Pinia, MapLibre GL JS, and Turf.js. T
 2. Add Overpass-backed POI search along a route corridor, including detour distance.
 3. Add Ride with GPS OAuth and route retrieval after confirming API access and terms.
 4. Add optional rerouting while retaining original route versions.
+
+
+### Import planning defaults
+
+A successful GPX/TCX import sets the target distance and Finish checkpoint to the imported track length, retains the selected distance unit for display, and initializes the overall speed and time estimate using the configurable 10 mph default. Change `estimatedTravelSpeedMph` and `defaultDistanceUnit` in `src/config/appConfig.ts` to adjust these defaults. Time is estimated as imported route distance divided by the configured speed; checkpoint/rest time is not added to this initial estimate.
+
+### Route import: map focus and waypoint checkpoints
+
+After a GPX or TCX import, the map resizes and fits the full imported track plus all imported waypoint coordinates. If the map is still loading when the file is selected, the fit is deferred until the map is ready. The checkpoint list is replaced with the imported route's waypoints and a new Finish row; checkpoints from the previously loaded route are discarded. GPX `<wpt>` and TCX `CoursePoint` labels are preserved exactly as supplied by the file. Waypoint category (Rest stop or Aid Station) is stored separately from its original name.

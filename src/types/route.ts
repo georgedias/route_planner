@@ -13,6 +13,8 @@ export interface RouteCheckpoint {
   restDurationMinutes: number
   /** Average speed for the segment ending at this checkpoint, in km/h. */
   averageSpeedKmh?: number
+  /** Original imported waypoint location; omitted for manually placed checkpoints. */
+  coordinates?: Position
 }
 export interface RoutePlan {
   id: string

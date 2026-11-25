@@ -1,38 +1,92 @@
 import type { Position } from '../types/route'
 
-export interface ParsedRoute { name: string; coordinates: Position[]; elevations: (number | null)[]; source: 'gpx' | 'tcx' }
+export interface ParsedWaypoint { name: string; coordinates: Position; category: 'rest' | 'aid_station' }
+export interface ParsedRoute { name: string; coordinates: Position[]; elevations: (number | null)[]; waypoints: ParsedWaypoint[]; source: 'gpx' | 'tcx' }
+
+function classifyWaypoint(values: (string | null | undefined)[]): 'rest' | 'aid_station' {
+  const text = values.filter(Boolean).join(' ').toLowerCase()
+  return /aid|control|checkpoint|water|fuel|feed|supply|hydration|food|caseys|gas station/.test(text) ? 'aid_station' : 'rest'
+}
+
+/** Namespace-independent XML lookup for GPX/TCX files. */
+function localElements(parent: Document | Element, name: string): Element[] {
+  return Array.from(parent.getElementsByTagName('*')).filter(el => el.localName.toLowerCase() === name.toLowerCase())
+}
+function localText(parent: Document | Element, name: string): string | null {
+  return localElements(parent, name)[0]?.textContent?.trim() || null
+}
+function coordinateFrom(parent: Element): Position | null {
+  const latText = localText(parent, 'LatitudeDegrees')
+  const lonText = localText(parent, 'LongitudeDegrees')
+  if (latText === null || lonText === null) return null
+  const lat = Number(latText)
+  const lon = Number(lonText)
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) return null
+  return [lon, lat]
+}
 
 export async function parseRouteFile(file: File): Promise<ParsedRoute> {
   const text = await file.text()
   const xml = new DOMParser().parseFromString(text, 'application/xml')
   if (xml.querySelector('parsererror')) throw new Error('This file is not valid GPX or TCX XML.')
   const root = xml.documentElement.localName.toLowerCase()
+
   if (root === 'gpx') {
-    const points = [...xml.getElementsByTagName('trkpt'), ...xml.getElementsByTagName('rtept')]
+    const points = [...localElements(xml, 'trkpt'), ...localElements(xml, 'rtept')]
     const coordinates: Position[] = []
     const elevations: (number | null)[] = []
     for (const point of points) {
       const lat = Number(point.getAttribute('lat')); const lon = Number(point.getAttribute('lon'))
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue
-      coordinates.push([lon, lat]); const ele = point.getElementsByTagName('ele')[0]?.textContent
-      elevations.push(ele && Number.isFinite(Number(ele)) ? Number(ele) : null)
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) continue
+      coordinates.push([lon, lat])
+      const ele = localText(point, 'ele')
+      elevations.push(ele !== null && Number.isFinite(Number(ele)) ? Number(ele) : null)
     }
-    const name = xml.getElementsByTagName('name')[0]?.textContent?.trim() || file.name.replace(/\.[^.]+$/, '')
-    return { name, coordinates, elevations, source: 'gpx' }
+    const waypoints: ParsedWaypoint[] = localElements(xml, 'wpt').flatMap(point => {
+      const lat = Number(point.getAttribute('lat')); const lon = Number(point.getAttribute('lon'))
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) return []
+      const value = (tag: string) => localText(point, tag)
+      const waypointName = value('name') || value('cmt') || value('desc') || 'Imported waypoint'
+      return [{ name: waypointName, coordinates: [lon, lat] as Position, category: classifyWaypoint([waypointName, value('type'), value('sym')]) }]
+    })
+    const name = localText(xml, 'name') || file.name.replace(/\.[^.]+$/, '')
+    return { name, coordinates, elevations, waypoints, source: 'gpx' }
   }
+
   if (root === 'trainingcenterdatabase') {
-    const points = [...xml.getElementsByTagName('Trackpoint')]
-    const coordinates: Position[] = []; const elevations: (number | null)[] = []
-    for (const point of points) {
-      const pos = point.getElementsByTagName('Position')[0]
-      const lat = Number(pos?.getElementsByTagName('LatitudeDegrees')[0]?.textContent)
-      const lon = Number(pos?.getElementsByTagName('LongitudeDegrees')[0]?.textContent)
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue
-      coordinates.push([lon, lat]); const ele = point.getElementsByTagName('AltitudeMeters')[0]?.textContent
-      elevations.push(ele && Number.isFinite(Number(ele)) ? Number(ele) : null)
+    // Garmin courses store geometry in Course/Track/Trackpoint. Activity TCX
+    // files instead store Trackpoint under Activity/Lap/Track.
+    const course = localElements(xml, 'Course')[0]
+    const trackpoints = course ? localElements(course, 'Trackpoint') : localElements(xml, 'Trackpoint')
+    const coordinates: Position[] = []
+    const elevations: (number | null)[] = []
+    for (const point of trackpoints) {
+      const position = localElements(point, 'Position')[0]
+      if (!position) continue
+      const coordinate = coordinateFrom(position)
+      if (!coordinate) continue
+      coordinates.push(coordinate)
+      const ele = localText(point, 'AltitudeMeters')
+      elevations.push(ele !== null && Number.isFinite(Number(ele)) ? Number(ele) : null)
     }
-    const name = xml.getElementsByTagName('Name')[0]?.textContent?.trim() || file.name.replace(/\.[^.]+$/, '')
-    return { name, coordinates, elevations, source: 'tcx' }
+
+    const coursepoints = course ? localElements(course, 'CoursePoint') : []
+    const waypoints: ParsedWaypoint[] = coursepoints.flatMap(point => {
+      const pointType = (localText(point, 'PointType') || '').trim().toLowerCase()
+      // Turn cues are navigation instructions, not places to stop.
+      if (pointType !== 'food' && pointType !== 'generic') return []
+      const position = localElements(point, 'Position')[0]
+      if (!position) return []
+      const coordinate = coordinateFrom(position)
+      if (!coordinate) return []
+      const waypointName = localText(point, 'Name') || localText(point, 'Notes') || 'Imported waypoint'
+      const notes = localText(point, 'Notes')
+      // Do not create checkpoints for route boundary markers.
+      if (pointType === 'generic' && /(^|\s)(start|end) of (the )?route|end of neutral lead out/i.test(`${waypointName} ${notes || ''}`)) return []
+      return [{ name: waypointName, coordinates: coordinate, category: pointType === 'food' ? 'aid_station' : classifyWaypoint([waypointName, notes]) }]
+    })
+    const name = (course && localText(course, 'Name')) || localText(xml, 'Name') || file.name.replace(/\.[^.]+$/, '')
+    return { name, coordinates, elevations, waypoints, source: 'tcx' }
   }
   throw new Error('Unsupported file. Please select a GPX or TCX route.')
 }

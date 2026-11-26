@@ -4,7 +4,11 @@ export type CheckpointType = 'split' | 'rest' | 'aid_station' | 'finish'
 export type DistanceUnit = 'km' | 'mi'
 export type SpeedMode = 'overall' | 'split'
 export type ClockFormat = '12h' | '24h'
-export interface RoutePoint { coordinates: Position; distanceKm: number; elevationM?: number }
+export interface RoutePoint {
+  coordinates: Position
+  distanceKm: number
+  elevationM?: number
+}
 export interface RouteCheckpoint {
   id: string
   type: CheckpointType

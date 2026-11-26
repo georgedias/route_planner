@@ -58,17 +58,17 @@ The PostGIS extension is enabled automatically for a fresh Docker volume. The da
 
 ## Workspace commands
 
-| Command | Purpose |
-|---|---|
-| `npm run dev` | Start Vue/Vite local planner |
-| `npm run dev:web` | Same as `dev` |
-| `npm run dev:api` | Start NestJS in watch mode |
-| `npm run build:web` | Build Vue application |
-| `npm run build:api` | Build NestJS API |
-| `npm run build` | Build shared package, frontend and API |
-| `npm run typecheck` | Type-check frontend and API |
-| `npm run format` | Format all workspace source and docs |
-| `npm run format:check` | Check formatting |
+| Command                | Purpose                                |
+| ---------------------- | -------------------------------------- |
+| `npm run dev`          | Start Vue/Vite local planner           |
+| `npm run dev:web`      | Same as `dev`                          |
+| `npm run dev:api`      | Start NestJS in watch mode             |
+| `npm run build:web`    | Build Vue application                  |
+| `npm run build:api`    | Build NestJS API                       |
+| `npm run build`        | Build shared package, frontend and API |
+| `npm run typecheck`    | Type-check frontend and API            |
+| `npm run format`       | Format all workspace source and docs   |
+| `npm run format:check` | Check formatting                       |
 
 ## Architecture and compatibility
 

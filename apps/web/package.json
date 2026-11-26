@@ -12,7 +12,7 @@
   "dependencies": {
     "@endurance-route-planner/shared": "0.2.0",
     "@turf/turf": "^7.2.0",
-    "maplibre-gl": "^5.6.0",
+    "maplibre-gl": "^6.4.1",
     "pinia": "^3.0.3",
     "vue": "^3.5.17"
   },

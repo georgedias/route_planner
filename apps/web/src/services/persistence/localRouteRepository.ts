@@ -19,7 +19,7 @@ export class LocalRouteRepository implements RouteRepository {
     try {
       if (typeof indexedDB === 'undefined') return this.loadFallback()
       const database = await this.openDatabase()
-      return await new Promise<RoutePlan | null>((resolve, reject) => {
+      const savedRoute = await new Promise<RoutePlan | null>((resolve, reject) => {
         const request = database
           .transaction(STORE_NAME, 'readonly')
           .objectStore(STORE_NAME)
@@ -27,6 +27,9 @@ export class LocalRouteRepository implements RouteRepository {
         request.onsuccess = () => resolve((request.result as RoutePlan | undefined) ?? null)
         request.onerror = () => reject(request.error)
       })
+      // A previous browser session may have needed the localStorage fallback.
+      // Check it when IndexedDB is available but has no active-route record.
+      return savedRoute ?? this.loadFallback()
     } catch (error) {
       console.warn('IndexedDB could not load the saved route; trying browser storage.', error)
       return this.loadFallback()
@@ -78,9 +81,22 @@ export class LocalRouteRepository implements RouteRepository {
           database.createObjectStore(STORE_NAME)
         }
       }
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-      request.onblocked = () => reject(new Error('The local route database is blocked by another tab.'))
+      request.onsuccess = () => {
+        const database = request.result
+        database.onversionchange = () => {
+          database.close()
+          this.databasePromise = undefined
+        }
+        resolve(database)
+      }
+      request.onerror = () => {
+        this.databasePromise = undefined
+        reject(request.error)
+      }
+      request.onblocked = () => {
+        this.databasePromise = undefined
+        reject(new Error('The local route database is blocked by another tab.'))
+      }
     })
 
     return this.databasePromise

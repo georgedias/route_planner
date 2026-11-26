@@ -36,7 +36,7 @@ npm install
 npm run dev
 ```
 
-The default `VITE_APP_MODE=local` runs without accounts, a backend, or PostgreSQL. The active route is saved in this browser using IndexedDB (with localStorage as a compatibility fallback). GPX and TCX import/export remain available. The local application does not require Docker.
+The default `VITE_APP_MODE=local` runs without accounts, a backend, or PostgreSQL. The active route is saved in this browser using IndexedDB (with localStorage as a compatibility fallback). GPX and TCX import are supported; GPX export includes checkpoint waypoints plus versioned planner metadata for round-trip restoration of the ride start date/time, target distance and units, time limit, overall/split speed mode, overall speed, clock format, and per-checkpoint speeds and stop durations. The local application does not require Docker. Local changes are automatically saved to the browser profile; reopening the app at the same origin restores the last active route, including checkpoints. Browser private sessions, cleared site data, or switching browser profiles/origins do not share that local database.
 
 ## Run the NestJS API foundation (optional)
 
@@ -74,7 +74,7 @@ The PostGIS extension is enabled automatically for a fresh Docker volume. The da
 
 - **Shared domain model:** `packages/shared/src/route.ts` defines route, checkpoint, speed and distance types. Frontend code imports it through `@endurance-route-planner/shared`.
 - **Shared calculations:** the Vue/Pinia route store remains the single calculation engine. The API persists the same domain values; it must not introduce a second distance or schedule calculator.
-- **Local mode:** browser IndexedDB persistence; no login, API or SQL database. GPX/TCX import and export remain available.
+- **Local mode:** browser IndexedDB persistence; no login, API or SQL database. GPX/TCX import and GPX export are available. GPX exports preserve checkpoint type, name, distance, stop duration and segment speed, plus planner settings (ride date/time, target distance, units, time limit, speed mode and overall speed) in versioned planner-specific extensions.
 - **Hosted mode:** Vue frontend + NestJS REST API + PostgreSQL/PostGIS. Authentication, account-owned route endpoints and production security controls are not implemented yet; do not expose the scaffold publicly.
 - **Ride with GPS:** not connected yet. The planned integration supports optional local companion authorization and per-user hosted OAuth.
 - **Canonical units:** route distances are stored in kilometres and speeds in kilometres/hour. Unit conversion happens at the UI boundary.
@@ -86,7 +86,7 @@ The PostGIS extension is enabled automatically for a fresh Docker volume. The da
 - Route geometry remains unchanged when target distance is edited
 - Kilometre/mile display, overall or per-segment speed planning
 - Checkpoint scheduling, weekday, arrival/departure, and stoppage-time estimates
-- Local browser persistence, GPX export, map and elevation profile
+- Local browser persistence, GPX checkpoint round-trip export/import, map and elevation profile
 
 ## Hosted deployment notes
 

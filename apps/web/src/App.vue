@@ -174,7 +174,32 @@ async function importSelected(e: Event) {
 function fitRoute(){ if(!map||!store.route.coordinates.length)return; const b=new maplibregl.LngLatBounds();store.route.coordinates.forEach(c=>b.extend(c));store.route.checkpoints.forEach(cp=>{if(cp.coordinates)b.extend(cp.coordinates)});map.fitBounds(b,{padding:65,duration:700});refreshMap() }
 watch(() => store.route.coordinates, async () => { await nextTick(); if (map && mapReady.value) fitRoute() })
 // Export the original route geometry; planning target edits do not reshape it.
-function exportGpx(){const content=makeGpx(store.route.name,store.route.coordinates,store.route.elevations);const blob=new Blob([content],{type:'application/gpx+xml'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${store.route.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.gpx`;a.click();URL.revokeObjectURL(url);store.setNotice('GPX export generated.')}
+function exportGpx() {
+  const content = makeGpx(
+    store.route.name,
+    store.route.coordinates,
+    store.route.elevations,
+    store.route.checkpoints,
+    {
+      targetDistanceKm: store.route.targetDistanceKm,
+      timeLimitMinutes: store.route.timeLimitMinutes,
+      averageSpeedKmh: store.route.averageSpeedKmh,
+      speedMode: store.route.speedMode,
+      distanceUnit: store.route.distanceUnit,
+      startDate: store.route.startDate,
+      startTime: store.route.startTime,
+      clockFormat: store.route.clockFormat
+    }
+  )
+  const blob = new Blob([content], { type: 'application/gpx+xml' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${store.route.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.gpx`
+  a.click()
+  URL.revokeObjectURL(url)
+  store.setNotice(`GPX export generated with ${store.route.checkpoints.length} checkpoints and planner settings.`)
+}
 function editCheckpoint(cp:RouteCheckpoint){ checkpointDraft.value = { ...cp, averageSpeedKmh: cp.averageSpeedKmh ?? store.route.averageSpeedKmh }; editorOpen.value = true; store.error = '' }
 function closeEditor(){ editorOpen.value = false; checkpointDraft.value = null }
 // Validate and persist the edited checkpoint, keeping Finish tied to target distance.

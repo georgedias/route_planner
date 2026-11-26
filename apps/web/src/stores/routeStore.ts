@@ -141,14 +141,18 @@ export const useRouteStore = defineStore('route', () => {
           : 0
         const type = waypoint.category
         return {
-          id: createCheckpointId(), type, name: waypoint.name || `${type === 'rest' ? 'Rest Stop' : 'Aid Station'} ${index + 1}`,
-          distanceKm, restDurationMinutes: type === 'rest' ? 15 : 0,
-          averageSpeedKmh: DEFAULT_ESTIMATED_SPEED_KMH, coordinates: waypoint.coordinates
+          id: createCheckpointId(), type: waypoint.checkpointType ?? type, name: waypoint.name || `${type === 'rest' ? 'Rest Stop' : 'Aid Station'} ${index + 1}`,
+          distanceKm: Number.isFinite(waypoint.distanceKm)
+            ? (waypoint.checkpointType === 'finish' ? Math.max(0, waypoint.distanceKm!) : Math.max(0, Math.min(importedDistance, waypoint.distanceKm!)))
+            : distanceKm,
+          restDurationMinutes: waypoint.restDurationMinutes ?? (type === 'rest' ? 15 : 0),
+          averageSpeedKmh: waypoint.averageSpeedKmh ?? DEFAULT_ESTIMATED_SPEED_KMH, coordinates: waypoint.coordinates
         }
       })
+      const importedFinish = waypointCheckpoints.find(cp => cp.type === 'finish')
       const checkpoints: RouteCheckpoint[] = [
-        ...waypointCheckpoints,
-        { id: createCheckpointId(), type: 'finish' as const, name: 'Finish', distanceKm: importedDistance,
+        ...waypointCheckpoints.filter(cp => cp.type !== 'finish'),
+        importedFinish ?? { id: createCheckpointId(), type: 'finish' as const, name: 'Finish', distanceKm: parsed.plannerSettings?.targetDistanceKm ?? importedDistance,
           restDurationMinutes: 0, averageSpeedKmh: DEFAULT_ESTIMATED_SPEED_KMH }
       ].sort((a, b) => a.distanceKm - b.distanceKm)
 
@@ -162,15 +166,20 @@ export const useRouteStore = defineStore('route', () => {
         coordinates: parsed.coordinates,
         elevations: parsed.elevations,
         distanceKm: importedDistance,
-        targetDistanceKm: importedDistance,
-        averageSpeedKmh: DEFAULT_ESTIMATED_SPEED_KMH,
-        timeLimitMinutes: importedDistance / DEFAULT_ESTIMATED_SPEED_KMH * 60,
-        speedMode: 'overall',
+        targetDistanceKm: parsed.plannerSettings?.targetDistanceKm ?? importedFinish?.distanceKm ?? importedDistance,
+        averageSpeedKmh: parsed.plannerSettings?.averageSpeedKmh ?? DEFAULT_ESTIMATED_SPEED_KMH,
+        timeLimitMinutes: parsed.plannerSettings?.timeLimitMinutes ?? importedDistance / DEFAULT_ESTIMATED_SPEED_KMH * 60,
+        speedMode: parsed.plannerSettings?.speedMode ?? 'overall',
+        distanceUnit: parsed.plannerSettings?.distanceUnit ?? route.value.distanceUnit,
+        startDate: parsed.plannerSettings?.startDate ?? route.value.startDate,
+        startTime: parsed.plannerSettings?.startTime ?? route.value.startTime,
+        clockFormat: parsed.plannerSettings?.clockFormat ?? route.value.clockFormat,
         checkpoints
       }
       const importedDisplayDistance = fromKm(importedDistance).toFixed(2)
-      const estimatedHours = (importedDistance / DEFAULT_ESTIMATED_SPEED_KMH).toFixed(2)
-      notice.value = `Imported ${file.name} · ${importedDisplayDistance} ${route.value.distanceUnit} · estimated ${estimatedHours} hours at ${APP_CONFIG.estimatedTravelSpeedMph} mph · ${waypointCheckpoints.length} waypoint${waypointCheckpoints.length === 1 ? '' : 's'} added as checkpoints.`
+      const estimatedHours = (importedDistance / route.value.averageSpeedKmh).toFixed(2)
+      const restored = parsed.plannerSettings ? ' · planner settings restored' : ''
+      notice.value = `Imported ${file.name} · ${importedDisplayDistance} ${route.value.distanceUnit} · estimated ${estimatedHours} hours · ${waypointCheckpoints.length} waypoint${waypointCheckpoints.length === 1 ? '' : 's'} added as checkpoints${restored}.`
     } catch (e) { error.value = e instanceof Error ? e.message : 'Unable to import this route.' }
   }
   function setNotice(message: string) { notice.value = message }

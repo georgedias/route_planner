@@ -25,14 +25,26 @@ async function bootstrapApplication() {
     }
 
     let saveTimer: ReturnType<typeof setTimeout> | undefined
+    const persistCurrentRoute = () => {
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = undefined
+      // Snapshot the current Pinia state at call time, not a stale watcher value.
+      void repository.saveActiveRoute(routeStore.route)
+    }
     watch(
       () => routeStore.route,
-      (route) => {
+      () => {
         if (saveTimer) clearTimeout(saveTimer)
-        saveTimer = setTimeout(() => void repository.saveActiveRoute(route), 250)
+        saveTimer = setTimeout(persistCurrentRoute, 200)
       },
       { deep: true, flush: 'post' },
     )
+    // Flush pending autosaves when the tab is backgrounded or closed. IndexedDB
+    // commits remain asynchronous; the normal debounce is the primary save path.
+    window.addEventListener('pagehide', persistCurrentRoute)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') persistCurrentRoute()
+    })
   }
 
   app.mount('#app')

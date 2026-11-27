@@ -56,6 +56,20 @@ docker compose exec -T postgres psql -U planner -d endurance_route_planner < app
 
 The PostGIS extension is enabled automatically for a fresh Docker volume. The database is optional and is not used by local mode.
 
+## Application Settings (Vite and Database)
+
+| Variable            | Correct location | Reason                             |
+| ------------------- | ---------------- | ---------------------------------- |
+| `VITE_APP_MODE`     | apps/web/.env.*  | Selects Local or Hosted Mode       |
+| `VITE_API_BASE_URL` | apps/web/.env.*  | Determines the API address         |
+| `PORT`              | apps/api/.env    | Controls the NestJS listening port |
+| `WEB_ORIGIN`        | apps/api/.env    | Controls allowed CORS origins      |
+| `DATABASE_URL`      | apps/api/.env    | Database connection information    |
+| `DATABASE_SSL`      | apps/api/.env    | Database SSL configuration         |
+
+These variables control the application's runtime environment, not the user's preferences.
+Vite variables are embedded into the frontend at build/startup time.
+
 ## Workspace commands (start, build, format)
 
 | Command                                | Purpose                                 |

@@ -1,18 +1,35 @@
 <script setup lang="ts">
   import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-
+  // import maplibregl, { type Map as MlMap, type GeoJSONSource } from 'maplibre-gl'
   import * as maplibregl from 'maplibre-gl'
   import type { Map as MlMap, GeoJSONSource } from 'maplibre-gl'
-  import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
-  maplibregl.setWorkerUrl(maplibreWorkerUrl)
-
   import { lineString, nearestPointOnLine } from '@turf/turf'
   import { useRouteStore } from './stores/routeStore'
+  import { useAppSettingsStore } from './stores/settingsStore'
   import { APPLICATION_MODE } from './config/runtimeMode'
   import { makeGpx } from './services/routeFiles'
+  import { KM_PER_MILE } from './config/appConfig'
   import type { DistanceUnit, RouteCheckpoint, CheckpointType } from './types/route'
 
   const store = useRouteStore()
+  const settings = useAppSettingsStore()
+  const settingsOpen = ref(false)
+
+  const settingsSpeedDisplay = computed({
+    get: () =>
+      Number(
+        (
+          settings.defaultSpeedKmh /
+          (settings.defaultDistanceUnit === 'mi' ? KM_PER_MILE : 1)
+        ).toFixed(2),
+      ),
+    set: (value: number) => {
+      if (Number.isFinite(value) && value > 0) {
+        settings.defaultSpeedKmh =
+          value * (settings.defaultDistanceUnit === 'mi' ? KM_PER_MILE : 1)
+      }
+    },
+  })
   const mapEl = ref<HTMLDivElement | null>(null)
   const fileInput = ref<HTMLInputElement | null>(null)
   const uploadingRoute = ref(false)
@@ -217,9 +234,7 @@
   // OpenStreetMap attribution remains available through the raster source metadata.
   function initMap() {
     if (!mapEl.value) return
-
-    // Keep a non-null local reference during initialization.
-    const mapInstance = new maplibregl.Map({
+    map = new maplibregl.Map({
       container: mapEl.value,
       style: {
         version: 8,
@@ -237,40 +252,24 @@
       zoom: 8.5,
       attributionControl: {},
     })
-
-    // Retain the shared reference for the other map functions.
-    // This is a non-null assertion because the map instance is guaranteed to exist after
-    // initialization, giving TypeScript a guaranteed non-null reference during initialization.
-    map = mapInstance
-
-    mapInstance.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
-
-    mapInstance.on('load', () => {
-      mapInstance.addSource('route-line', {
-        type: 'geojson',
-        data: routeGeoJson() as never,
-      })
-
-      mapInstance.addLayer({
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+    map.on('load', () => {
+      if (!map) return
+      map.addSource('route-line', { type: 'geojson', data: routeGeoJson() as never })
+      map.addLayer({
         id: 'route-casing',
         type: 'line',
         source: 'route-line',
         paint: { 'line-color': '#092b45', 'line-width': 9, 'line-opacity': 0.85 },
       })
-
-      mapInstance.addLayer({
+      map.addLayer({
         id: 'route-stroke',
         type: 'line',
         source: 'route-line',
         paint: { 'line-color': '#168cf5', 'line-width': 5, 'line-opacity': 0.98 },
       })
-
-      mapInstance.addSource('route-checkpoints', {
-        type: 'geojson',
-        data: checkpointGeoJson() as never,
-      })
-
-      mapInstance.addLayer({
+      map.addSource('route-checkpoints', { type: 'geojson', data: checkpointGeoJson() as never })
+      map.addLayer({
         id: 'checkpoint-circles',
         type: 'circle',
         source: 'route-checkpoints',
@@ -291,8 +290,7 @@
           'circle-stroke-color': '#fff',
         },
       })
-
-      mapInstance.addLayer({
+      map.addLayer({
         id: 'checkpoint-labels',
         type: 'symbol',
         source: 'route-checkpoints',
@@ -312,42 +310,33 @@
         },
         paint: { 'text-color': '#fff', 'text-halo-color': '#142334', 'text-halo-width': 2 },
       })
-
-      mapInstance.on('click', (e) => {
-        if (store.route.coordinates.length < 2) return
-
+      map.on('click', (e) => {
+        if (!map || store.route.coordinates.length < 2) return
         const nearest = nearestPointOnLine(
           lineString(store.route.coordinates),
           [e.lngLat.lng, e.lngLat.lat],
           { units: 'kilometers' },
         )
-
         const km = Number(nearest.properties.location?.toFixed(1) ?? 0)
         store.addCheckpoint('split', km)
         store.setNotice(
           `Split added at ${displayDistance(km)} ${unitLabel.value}. Existing route geometry was not changed.`,
         )
       })
-
       const bounds = new maplibregl.LngLatBounds()
-
       store.route.coordinates.forEach((c) => bounds.extend(c))
       store.route.checkpoints.forEach((cp) => {
         if (cp.coordinates) bounds.extend(cp.coordinates)
       })
-
-      mapInstance.resize()
-      mapInstance.fitBounds(bounds, { padding: 55, duration: 0 })
+      map.resize()
+      map.fitBounds(bounds, { padding: 55, duration: 0 })
       mapReady.value = true
     })
-
-    mapInstance.on('error', (e) => {
-      if (String(e.error?.message || '').includes('tile')) {
+    map.on('error', (e) => {
+      if (String(e.error?.message || '').includes('tile'))
         mapError.value = 'Map tiles may be unavailable. Check your internet connection.'
-      }
     })
   }
-
   function openFilePicker() {
     if (uploadingRoute.value) return
     // Keep the native picker activation directly inside the button's click gesture.
@@ -485,6 +474,18 @@
     refreshMap,
     { deep: true },
   )
+  // Keep the MapLibre instance mounted while Settings is open. Once the route
+  // workspace is visible again, recalculate its dimensions so the map renders
+  // correctly instead of retaining the zero-sized hidden layout.
+  watch(settingsOpen, async (isOpen) => {
+    if (isOpen) return
+    await nextTick()
+    window.requestAnimationFrame(() => {
+      if (!map || !mapReady.value) return
+      map.resize()
+      refreshMap()
+    })
+  })
   onMounted(() => initMap())
   onBeforeUnmount(() => map?.remove())
 </script>
@@ -497,16 +498,83 @@
         <div><strong>ENDURANCE</strong><span>ROUTE PLANNER</span></div>
       </div>
       <nav>
-        <a class="active">⌖ Route Planner</a><a>▤ My Routes</a><a>↗ Ride with GPS</a
-        ><a>⚙ Settings</a>
+        <a
+          class="nav-action"
+          :class="{ active: !settingsOpen }"
+          @click="settingsOpen = false"
+          >⌖ Route Planner</a
+        >
+        <a>▤ My Routes</a>
+        <a>↗ Ride with GPS</a>
+        <a
+          class="nav-action"
+          :class="{ active: settingsOpen }"
+          @click="settingsOpen = true"
+          >⚙ Settings</a
+        >
       </nav>
       <div class="profile">
         <span class="mode-pill">{{
           APPLICATION_MODE === 'local' ? 'LOCAL MODE' : 'HOSTED MODE'
-        }}</span><span class="avatar">GP</span><span>Planner</span><span>⌄</span>
+        }}</span
+        ><span class="avatar">GP</span><span>Planner</span><span>⌄</span>
       </div>
     </header>
-    <main class="workspace">
+    <main v-if="settingsOpen" class="settings-page">
+      <section class="settings-panel panel">
+        <div class="panel-heading">⚙ Application Settings</div>
+        <p class="settings-description">
+          Configure the default planning preferences used when creating or importing routes.
+          These settings do not change routes that are already loaded.
+        </p>
+
+        <div class="settings-section">
+          <h3>Distance and speed</h3>
+          <label>
+            Default distance unit
+            <select v-model="settings.defaultDistanceUnit">
+              <option value="mi">Miles (mi)</option>
+              <option value="km">Kilometres (km)</option>
+            </select>
+          </label>
+          <label>
+            Default average speed ({{ settings.defaultDistanceUnit === 'mi' ? 'mph' : 'km/h' }})
+            <input
+              v-model.number="settingsSpeedDisplay"
+              type="number"
+              min="0.1"
+              max="100"
+              step="0.01"
+            />
+            <small>Stored internally as {{ settings.defaultSpeedKmh.toFixed(2) }} km/h.</small>
+          </label>
+          <label>
+            Default speed planning method
+            <select v-model="settings.defaultSpeedMode">
+              <option value="overall">One overall average speed</option>
+              <option value="split">Speed for each segment</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="settings-section">
+          <h3>Time display</h3>
+          <label>
+            Default clock format
+            <select v-model="settings.defaultClockFormat">
+              <option value="12h">12-hour (AM / PM)</option>
+              <option value="24h">24-hour</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="settings-actions">
+          <button class="secondary-btn" @click="settings.resetSettings()">Restore defaults</button>
+          <button class="primary-btn" @click="settingsOpen = false">Done</button>
+        </div>
+      </section>
+    </main>
+    <main v-show="!settingsOpen" class="workspace">
       <aside class="sidebar panel">
         <div class="panel-heading">
           <span>⚙</span> Route configuration <small>{{ sourceLabel }}</small>
@@ -620,7 +688,8 @@
           <div v-for="(cp, index) in checkpointRows" :key="cp.id" class="checkpoint-item">
             <span class="drag">⠿</span><i class="dot" :class="cp.type"></i>
             <div class="checkpoint-info">
-              <strong>{{ cp.name }}</strong><small
+              <strong>{{ cp.name }}</strong
+              ><small
                 >{{ displayDistance(cp.distanceKm) }} {{ unitLabel }} · ETA
                 {{ arrivalFor(cp) }}</small
               >
@@ -797,7 +866,8 @@
             <div>
               <strong>{{
                 store.withinConstraints ? 'Plan meets limits' : 'Plan needs adjustment'
-              }}</strong><small>{{
+              }}</strong
+              ><small>{{
                 !store.distanceWithinTarget
                   ? 'Route is ' +
                     displayDistance(store.distanceKm - store.route.targetDistanceKm) +
@@ -851,7 +921,7 @@
         </div>
       </aside>
     </main>
-    <footer class="bottom-bar">
+    <footer v-if="!settingsOpen" class="bottom-bar">
       <div class="status"><span class="status-dot"></span>{{ store.error || store.notice }}</div>
       <div class="footer-actions">
         <button @click="fitRoute">◎ Fit route</button
@@ -957,3 +1027,79 @@
     <div v-if="mapError" class="toast">{{ mapError }}</div>
   </div>
 </template>
+
+
+<style scoped>
+/* Only the two working navigation destinations advertise clickability. */
+.topbar nav .nav-action {
+  cursor: pointer;
+}
+
+.settings-page {
+  width: min(760px, calc(100% - 40px));
+  margin: 32px auto;
+  padding-bottom: 32px;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+}
+
+.settings-description {
+  margin: 0;
+  color: var(--muted, #9aa8b7);
+  line-height: 1.55;
+}
+
+.settings-section {
+  display: grid;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, #263748);
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.settings-section label {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-section input,
+.settings-section select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+}
+
+.settings-section small {
+  color: var(--muted, #9aa8b7);
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+@media (max-width: 560px) {
+  .settings-page {
+    width: calc(100% - 24px);
+    margin: 16px auto;
+  }
+
+  .settings-panel {
+    padding: 16px;
+  }
+
+  .settings-actions {
+    flex-wrap: wrap;
+  }
+}
+</style>

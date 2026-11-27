@@ -3,7 +3,8 @@ import { defineStore } from 'pinia'
 import { along, length, lineString, nearestPointOnLine } from '@turf/turf'
 import type { DistanceUnit, Position, RouteCheckpoint, RoutePlan } from '../types/route'
 import { parseRouteFile } from '../services/routeFiles'
-import { APP_CONFIG, DEFAULT_ESTIMATED_SPEED_KMH, KM_PER_MILE } from '../config/appConfig'
+import { KM_PER_MILE } from '../config/appConfig'
+import { useAppSettingsStore } from './settingsStore'
 const demoCoordinates: Position[] = [
   [-92.25, 37.83],
   [-92.2, 37.87],
@@ -47,6 +48,8 @@ function createCheckpointId(): string {
 }
 
 export const useRouteStore = defineStore('route', () => {
+  const settings = useAppSettingsStore()
+
   const route = ref<RoutePlan>({
     id: 'demo-route',
     name: 'Ozark Century Challenge',
@@ -57,13 +60,13 @@ export const useRouteStore = defineStore('route', () => {
     ),
     distanceKm: 0,
     targetDistanceKm: DEMO_ROUTE_DISTANCE_KM,
-    timeLimitMinutes: (DEMO_ROUTE_DISTANCE_KM / DEFAULT_ESTIMATED_SPEED_KMH) * 60,
-    averageSpeedKmh: DEFAULT_ESTIMATED_SPEED_KMH,
-    speedMode: 'overall',
-    distanceUnit: APP_CONFIG.defaultDistanceUnit,
+    timeLimitMinutes: (DEMO_ROUTE_DISTANCE_KM / settings.defaultSpeedKmh) * 60,
+    averageSpeedKmh: settings.defaultSpeedKmh,
+    speedMode: settings.defaultSpeedMode,
+    distanceUnit: settings.defaultDistanceUnit,
     startTime: '07:00',
     startDate: localDateString(),
-    clockFormat: '12h',
+    clockFormat: settings.defaultClockFormat,
     checkpoints: [
       {
         id: 'cp-1',
@@ -264,6 +267,8 @@ export const useRouteStore = defineStore('route', () => {
       const importedDistance = length(lineString(parsed.coordinates), { units: 'kilometers' })
       // Build imported checkpoints before replacing the route. This includes
       // every supported stop waypoint from the file, plus a single Finish.
+      const importedAverageSpeedKmh =
+        parsed.plannerSettings?.averageSpeedKmh ?? settings.defaultSpeedKmh
       const importedLine = lineString(parsed.coordinates)
       const waypointCheckpoints: RouteCheckpoint[] = parsed.waypoints.map((waypoint, index) => {
         const snapped = nearestPointOnLine(importedLine, waypoint.coordinates, {
@@ -284,7 +289,7 @@ export const useRouteStore = defineStore('route', () => {
               : Math.max(0, Math.min(importedDistance, waypoint.distanceKm!))
             : distanceKm,
           restDurationMinutes: waypoint.restDurationMinutes ?? (type === 'rest' ? 15 : 0),
-          averageSpeedKmh: waypoint.averageSpeedKmh ?? DEFAULT_ESTIMATED_SPEED_KMH,
+          averageSpeedKmh: waypoint.averageSpeedKmh ?? importedAverageSpeedKmh,
           coordinates: waypoint.coordinates,
         }
       })
@@ -297,7 +302,7 @@ export const useRouteStore = defineStore('route', () => {
           name: 'Finish',
           distanceKm: parsed.plannerSettings?.targetDistanceKm ?? importedDistance,
           restDurationMinutes: 0,
-          averageSpeedKmh: DEFAULT_ESTIMATED_SPEED_KMH,
+          averageSpeedKmh: settings.defaultSpeedKmh,
         },
       ].sort((a, b) => a.distanceKm - b.distanceKm)
 
@@ -315,15 +320,15 @@ export const useRouteStore = defineStore('route', () => {
           parsed.plannerSettings?.targetDistanceKm ??
           importedFinish?.distanceKm ??
           importedDistance,
-        averageSpeedKmh: parsed.plannerSettings?.averageSpeedKmh ?? DEFAULT_ESTIMATED_SPEED_KMH,
+        averageSpeedKmh: importedAverageSpeedKmh,
         timeLimitMinutes:
           parsed.plannerSettings?.timeLimitMinutes ??
-          (importedDistance / DEFAULT_ESTIMATED_SPEED_KMH) * 60,
-        speedMode: parsed.plannerSettings?.speedMode ?? 'overall',
-        distanceUnit: parsed.plannerSettings?.distanceUnit ?? route.value.distanceUnit,
+          (importedDistance / importedAverageSpeedKmh) * 60,
+        speedMode: parsed.plannerSettings?.speedMode ?? settings.defaultSpeedMode,
+        distanceUnit: parsed.plannerSettings?.distanceUnit ?? settings.defaultDistanceUnit,
         startDate: parsed.plannerSettings?.startDate ?? route.value.startDate,
         startTime: parsed.plannerSettings?.startTime ?? route.value.startTime,
-        clockFormat: parsed.plannerSettings?.clockFormat ?? route.value.clockFormat,
+        clockFormat: parsed.plannerSettings?.clockFormat ?? settings.defaultClockFormat,
         checkpoints,
       }
       const importedDisplayDistance = fromKm(importedDistance).toFixed(2)

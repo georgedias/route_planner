@@ -1,8 +1,5 @@
 <script setup lang="ts">
   import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-  // import maplibregl, { type Map as MlMap, type GeoJSONSource } from 'maplibre-gl'
-//  import * as maplibregl from 'maplibre-gl'
-//  import type { Map as MlMap, GeoJSONSource } from 'maplibre-gl'
 
   import * as maplibregl from 'maplibre-gl'
   import type { Map as MlMap, GeoJSONSource } from 'maplibre-gl'

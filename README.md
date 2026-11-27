@@ -56,19 +56,50 @@ docker compose exec -T postgres psql -U planner -d endurance_route_planner < app
 
 The PostGIS extension is enabled automatically for a fresh Docker volume. The database is optional and is not used by local mode.
 
-## Workspace commands
+## Workspace commands (start, build, format)
 
-| Command                | Purpose                                |
-| ---------------------- | -------------------------------------- |
-| `npm run dev`          | Start Vue/Vite local planner           |
-| `npm run dev:web`      | Same as `dev`                          |
-| `npm run dev:api`      | Start NestJS in watch mode             |
-| `npm run build:web`    | Build Vue application                  |
-| `npm run build:api`    | Build NestJS API                       |
-| `npm run build`        | Build shared package, frontend and API |
-| `npm run typecheck`    | Type-check frontend and API            |
-| `npm run format`       | Format all workspace source and docs   |
-| `npm run format:check` | Check formatting                       |
+| Command                                | Purpose                                 |
+| -------------------------------------- | --------------------------------------- |
+| `npm run dev`                          | Start Vue/Vite local planner            |
+| `npm run dev:web`                      | Explicit start frontend (same as `dev`) |
+| `npm run dev:api`                      | Start NestJS in watch mode (API server) |
+| `npm run build:web`                    | Build Vue application (frontend)        |
+| `npm run build:api`                    | Build NestJS API                        |
+| `npm run build`                        | Build shared package, frontend and API  |
+| `npm run preview --workspace=apps/web` | Preview the Production frontend         |
+| `npm run typecheck`                    | Type-check frontend and API             |
+| `npm run format`                       | Format all workspace source and docs    |
+| `npm run format:check`                 | Check formatting                        |
+
+## Workspace commands (run)
+
+### Local Mode
+
+| Command           | Purpose                                               |
+| ----------------- | ----------------------------------------------------- |
+| `npm run dev`     | Start Vue/Vite local planner                          |
+| `npm run dev:web` | Same as `dev` (loads apps\web\.env.development.local) |
+
+Runs on:
+
+http://localhost:5173
+
+### Hosted Mode
+
+Hosted Mode requires the API server and frontend to run separately.
+
+| Command              | Purpose                                           |
+| -------------------- | ------------------------------------------------- |
+| `npm run dev:hosted` | Start frontend (loads apps\web\.env.hosted.local) |
+| `npm run dev:api`    | Start NestJS in watch mode (API server)           |
+| `npm run build:web`  | Build Vue application                             |
+| `npm run build:api`  | Build NestJS API                                  |
+| `npm run build`      | Build shared package, frontend and API            |
+
+**Important:**
+
+`VITE_APP_MODE` and `VITE_API_BASE_URL` are Vite environment variables. They must be configured before building the frontend so their values are included in the production build.
+These variables are configure in the `apps/web/.env.developement.local` and `apps/web/.env.hosted.local` files.
 
 ## Architecture and compatibility
 
